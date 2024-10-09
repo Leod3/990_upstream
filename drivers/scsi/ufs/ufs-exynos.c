@@ -1200,90 +1200,17 @@ static u8 exynos_ufs_get_unipro_direct(struct ufs_hba *hba, u32 num)
 	return unipro_readl(ufs, offset[num]);
 }
 
-#ifdef CONFIG_SCSI_UFS_EXYNOS_FMP
-static struct bio *get_bio(struct ufs_hba *hba, struct ufshcd_lrb *lrbp)
-{
-	if (!hba || !lrbp) {
-		pr_err("%s: Invalid MMC:%p data:%p\n", __func__, hba, lrbp);
-		return NULL;
-	}
-
-	if (!virt_addr_valid(lrbp->cmd)) {
-		dev_err(hba->dev, "Invalid cmd:%p\n", lrbp->cmd);
-		return NULL;
-	}
-
-	if (!virt_addr_valid(lrbp->cmd->request->bio)) {
-		if (lrbp->cmd->request->bio)
-			dev_err(hba->dev, "Invalid bio:%p\n",
-				lrbp->cmd->request->bio);
-		return NULL;
-	} else {
-		return lrbp->cmd->request->bio;
-	}
-}
-
-static int exynos_ufs_crypto_engine_cfg(struct ufs_hba *hba,
-				struct ufshcd_lrb *lrbp)
-{
-	int sg_segments = scsi_sg_count(lrbp->cmd);
-	int idx;
-	struct scatterlist *sg;
-	struct bio *bio = get_bio(hba, lrbp);
-	int ret;
-	int sector_offset = 0;
-
-	if (!bio || !sg_segments)
-		return 0;
-
-	scsi_for_each_sg(lrbp->cmd, sg, sg_segments, idx) {
-		ret = exynos_fmp_crypt_cfg(bio,
-			(void *)&lrbp->ucd_prdt_ptr[idx], idx, sector_offset);
-		sector_offset += 8; /* UFSHCI_SECTOR_SIZE / MIN_SECTOR_SIZE */
-		if (ret)
-			return ret;
-	}
-	return 0;
-}
-
-static int exynos_ufs_crypto_engine_clear(struct ufs_hba *hba,
-				struct ufshcd_lrb *lrbp)
-{
-	int sg_segments = scsi_sg_count(lrbp->cmd);
-	int idx;
-	struct scatterlist *sg;
-	struct bio *bio = get_bio(hba, lrbp);
-	int ret;
-
-	if (!bio || !sg_segments)
-		return 0;
-
-	scsi_for_each_sg(lrbp->cmd, sg, sg_segments, idx) {
-		ret = exynos_fmp_crypt_clear(bio,
-			(void *)&lrbp->ucd_prdt_ptr[idx]);
-		if (ret)
-			return ret;
-	}
-	return 0;
-}
-
 static int exynos_ufs_crypto_sec_cfg(struct ufs_hba *hba, bool init)
 {
 	struct exynos_ufs *ufs = to_exynos_ufs(hba);
 
-	dev_err(ufs->dev, "%s: fmp:%d, smu:%d, init:%d\n",
-			__func__, ufs->fmp, ufs->smu, init);
-	return exynos_fmp_sec_cfg(ufs->fmp, ufs->smu, init);
-}
+	writel(0x0, ufs->reg_ufsp + UFSPSBEGIN0);
+	writel(0xffffffff, ufs->reg_ufsp + UFSPSEND0);
+	writel(0xff, ufs->reg_ufsp + UFSPSLUN0);
+	writel(0xf1, ufs->reg_ufsp + UFSPSCTRL0);
 
-static int exynos_ufs_access_control_abort(struct ufs_hba *hba)
-{
-	struct exynos_ufs *ufs = to_exynos_ufs(hba);
-
-	dev_err(ufs->dev, "%s: smu:%d\n", __func__, ufs->smu);
-	return exynos_fmp_smu_abort(ufs->smu);
+	return 0;
 }
-#endif
 
 static void exynos_ufs_perf_mode(struct ufs_hba *hba, struct scsi_cmnd *cmd)
 {
@@ -1315,12 +1242,6 @@ static struct ufs_hba_variant_ops exynos_ufs_ops = {
 	.suspend = __exynos_ufs_suspend,
 	.resume = __exynos_ufs_resume,
 	.get_unipro_result = exynos_ufs_get_unipro_direct,
-#ifdef CONFIG_SCSI_UFS_EXYNOS_FMP
-	.crypto_engine_cfg = exynos_ufs_crypto_engine_cfg,
-	.crypto_engine_clear = exynos_ufs_crypto_engine_clear,
-	.access_control_abort = exynos_ufs_access_control_abort,
-	.crypto_sec_cfg = exynos_ufs_crypto_sec_cfg,
-#endif
 	.perf_mode = exynos_ufs_perf_mode,
 };
 
