@@ -750,7 +750,8 @@ static void exynos_ufs_set_features(struct ufs_hba *hba, u32 hw_rev)
 	/* quirks of common driver */
 	hba->quirks = UFSHCD_QUIRK_PRDT_BYTE_GRAN |
 			UFSHCD_QUIRK_UNRESET_INTR_AGGR |
-			UFSHCD_QUIRK_BROKEN_REQ_LIST_CLR;
+			UFSHCD_QUIRK_BROKEN_REQ_LIST_CLR |
+			UFSHCD_QUIRK_BROKEN_CRYPTO;
 
 	/* quirks of exynos-specific driver */
 }
@@ -823,8 +824,7 @@ static int exynos_ufs_init(struct ufs_hba *hba)
 	else
 		ufs->smu = id;
 
-	/* FMPSECURITY & SMU */
-	ufshcd_vops_crypto_sec_cfg(hba, true);
+	exynos_ufs_fmp_config(hba, 1);
 
 	/* Enable log */
 	ret =  exynos_ufs_init_dbg(hba);
@@ -1173,10 +1173,9 @@ static int __exynos_ufs_resume(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 		clk_prepare_enable(ufs->clk_hci);
 	exynos_ufs_ctrl_auto_hci_clk(ufs, false);
 
-	exynos_ufs_ctrl_cport_log(ufs, true, 0);
+	exynos_ufs_fmp_config(hba, 0);
 
-	/* FMPSECURITY & SMU resume */
-	ufshcd_vops_crypto_sec_cfg(hba, false);
+	exynos_ufs_ctrl_cport_log(ufs, true, 0);
 
 	if (ufshcd_is_clkgating_allowed(hba))
 		clk_disable_unprepare(ufs->clk_hci);
@@ -1198,18 +1197,6 @@ static u8 exynos_ufs_get_unipro_direct(struct ufs_hba *hba, u32 num)
 	struct exynos_ufs *ufs = to_exynos_ufs(hba);
 
 	return unipro_readl(ufs, offset[num]);
-}
-
-static int exynos_ufs_crypto_sec_cfg(struct ufs_hba *hba, bool init)
-{
-	struct exynos_ufs *ufs = to_exynos_ufs(hba);
-
-	writel(0x0, ufs->reg_ufsp + UFSPSBEGIN0);
-	writel(0xffffffff, ufs->reg_ufsp + UFSPSEND0);
-	writel(0xff, ufs->reg_ufsp + UFSPSLUN0);
-	writel(0xf1, ufs->reg_ufsp + UFSPSCTRL0);
-
-	return 0;
 }
 
 static void exynos_ufs_perf_mode(struct ufs_hba *hba, struct scsi_cmnd *cmd)
