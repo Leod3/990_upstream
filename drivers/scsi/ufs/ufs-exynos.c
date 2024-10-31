@@ -1283,18 +1283,6 @@ static int exynos_ufs_access_control_abort(struct ufs_hba *hba)
 	dev_err(ufs->dev, "%s: smu:%d\n", __func__, ufs->smu);
 	return exynos_fmp_smu_abort(ufs->smu);
 }
-#else
-static int exynos_ufs_crypto_sec_cfg(struct ufs_hba *hba, bool init)
-{
-	struct exynos_ufs *ufs = to_exynos_ufs(hba);
-
-	writel(0x0, ufs->reg_ufsp + UFSPSBEGIN0);
-	writel(0xffffffff, ufs->reg_ufsp + UFSPSEND0);
-	writel(0xff, ufs->reg_ufsp + UFSPSLUN0);
-	writel(0xf1, ufs->reg_ufsp + UFSPSCTRL0);
-
-	return 0;
-}
 #endif
 
 static void exynos_ufs_perf_mode(struct ufs_hba *hba, struct scsi_cmnd *cmd)
@@ -1331,8 +1319,8 @@ static struct ufs_hba_variant_ops exynos_ufs_ops = {
 	.crypto_engine_cfg = exynos_ufs_crypto_engine_cfg,
 	.crypto_engine_clear = exynos_ufs_crypto_engine_clear,
 	.access_control_abort = exynos_ufs_access_control_abort,
-#endif
 	.crypto_sec_cfg = exynos_ufs_crypto_sec_cfg,
+#endif
 	.perf_mode = exynos_ufs_perf_mode,
 };
 
