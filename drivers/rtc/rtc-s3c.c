@@ -1,17 +1,17 @@
 /* drivers/rtc/rtc-s3c.c
- *
- * Copyright (c) 2010 Samsung Electronics Co., Ltd.
- *		http://www.samsung.com/
- *
- * Copyright (c) 2004,2006 Simtec Electronics
- *	Ben Dooks, <ben@simtec.co.uk>
- *	http://armlinux.simtec.co.uk/
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * S3C2410/S3C2440/S3C24XX Internal RTC Driver
+*
+* Copyright (c) 2010 Samsung Electronics Co., Ltd.
+*		http://www.samsung.com/
+*
+* Copyright (c) 2004,2006 Simtec Electronics
+*	Ben Dooks, <ben@simtec.co.uk>
+*	http://armlinux.simtec.co.uk/
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License version 2 as
+* published by the Free Software Foundation.
+*
+* S3C2410/S3C2440/S3C24XX Internal RTC Driver
 */
 
 #include <linux/module.h>
@@ -33,340 +33,334 @@
 #include "rtc-s3c.h"
 
 struct s3c_rtc {
-	struct device *dev;
-	struct rtc_device *rtc;
+struct device *dev;
+struct rtc_device *rtc;
 
-	void __iomem *base;
-	struct clk *rtc_clk;
-	struct clk *rtc_src_clk;
-	bool clk_disabled;
+void __iomem *base;
+struct clk *rtc_clk;
+struct clk *rtc_src_clk;
+bool clk_disabled;
 
-	const struct s3c_rtc_data *data;
+const struct s3c_rtc_data *data;
 
-	int irq_alarm;
-	int irq_tick;
+int irq_alarm;
+int irq_tick;
 
-	spinlock_t pie_lock;
-	spinlock_t alarm_clk_lock;
+spinlock_t pie_lock;
+spinlock_t alarm_clk_lock;
 
-	int ticnt_save;
-	int ticnt_en_save;
-	bool wake_en;
+int ticnt_save;
+int ticnt_en_save;
+bool wake_en;
 };
 
 struct s3c_rtc_data {
-	int max_user_freq;
-	bool needs_src_clk;
-	bool clock_ctrl_disable;
+int max_user_freq;
+bool needs_src_clk;
+bool clock_ctrl_disable;
 
-	void (*irq_handler) (struct s3c_rtc *info, int mask);
-	void (*set_freq) (struct s3c_rtc *info, int freq);
-	void (*enable_tick) (struct s3c_rtc *info, struct seq_file *seq);
-	void (*select_tick_clk) (struct s3c_rtc *info);
-	void (*save_tick_cnt) (struct s3c_rtc *info);
-	void (*restore_tick_cnt) (struct s3c_rtc *info);
-	void (*enable) (struct s3c_rtc *info);
-	void (*disable) (struct s3c_rtc *info);
+void (*irq_handler) (struct s3c_rtc *info, int mask);
+void (*set_freq) (struct s3c_rtc *info, int freq);
+void (*enable_tick) (struct s3c_rtc *info, struct seq_file *seq);
+void (*select_tick_clk) (struct s3c_rtc *info);
+void (*save_tick_cnt) (struct s3c_rtc *info);
+void (*restore_tick_cnt) (struct s3c_rtc *info);
+void (*enable) (struct s3c_rtc *info);
+void (*disable) (struct s3c_rtc *info);
 };
 
 static int s3c_rtc_enable_clk(struct s3c_rtc *info)
 {
-	unsigned long irq_flags;
-	int ret = 0;
+unsigned long irq_flags;
+int ret = 0;
 
-	if (info->data->clock_ctrl_disable)
-		return ret;
+if (info->data->clock_ctrl_disable)
+	return ret;
 
-	spin_lock_irqsave(&info->alarm_clk_lock, irq_flags);
+spin_lock_irqsave(&info->alarm_clk_lock, irq_flags);
 
-	if (info->clk_disabled) {
-		ret = clk_enable(info->rtc_clk);
-		if (ret)
+if (info->clk_disabled) {
+	ret = clk_enable(info->rtc_clk);
+	if (ret)
+		goto out;
+
+	if (info->data->needs_src_clk) {
+		ret = clk_enable(info->rtc_src_clk);
+		if (ret) {
+			clk_disable(info->rtc_clk);
 			goto out;
-
-		if (info->data->needs_src_clk) {
-			ret = clk_enable(info->rtc_src_clk);
-			if (ret) {
-				clk_disable(info->rtc_clk);
-				goto out;
-			}
 		}
-		info->clk_disabled = false;
 	}
+	info->clk_disabled = false;
+}
 
 out:
-	spin_unlock_irqrestore(&info->alarm_clk_lock, irq_flags);
+spin_unlock_irqrestore(&info->alarm_clk_lock, irq_flags);
 
-	return ret;
+return ret;
 }
 
 static void s3c_rtc_disable_clk(struct s3c_rtc *info)
 {
-	unsigned long irq_flags;
+unsigned long irq_flags;
 
-	if (info->data->clock_ctrl_disable)
-		return;
+if (info->data->clock_ctrl_disable)
+	return;
 
-	spin_lock_irqsave(&info->alarm_clk_lock, irq_flags);
-	if (!info->clk_disabled) {
-		if (info->data->needs_src_clk)
-			clk_disable(info->rtc_src_clk);
-		clk_disable(info->rtc_clk);
-		info->clk_disabled = true;
-	}
-	spin_unlock_irqrestore(&info->alarm_clk_lock, irq_flags);
+spin_lock_irqsave(&info->alarm_clk_lock, irq_flags);
+if (!info->clk_disabled) {
+	if (info->data->needs_src_clk)
+		clk_disable(info->rtc_src_clk);
+	clk_disable(info->rtc_clk);
+	info->clk_disabled = true;
+}
+spin_unlock_irqrestore(&info->alarm_clk_lock, irq_flags);
 }
 
 /* IRQ Handlers */
 static irqreturn_t s3c_rtc_tickirq(int irq, void *id)
 {
-	struct s3c_rtc *info = (struct s3c_rtc *)id;
+struct s3c_rtc *info = (struct s3c_rtc *)id;
 
-	if (info->data->irq_handler)
-		info->data->irq_handler(info, S3C2410_INTP_TIC_0);
+if (info->data->irq_handler)
+	info->data->irq_handler(info, S3C2410_INTP_TIC_0);
 
-	return IRQ_HANDLED;
+return IRQ_HANDLED;
 }
 
 static irqreturn_t s3c_rtc_alarmirq(int irq, void *id)
 {
-	struct s3c_rtc *info = (struct s3c_rtc *)id;
+struct s3c_rtc *info = (struct s3c_rtc *)id;
 
-	if (info->data->irq_handler)
-		info->data->irq_handler(info, S3C2410_INTP_ALM);
+if (info->data->irq_handler)
+	info->data->irq_handler(info, S3C2410_INTP_ALM);
 
-	return IRQ_HANDLED;
+return IRQ_HANDLED;
 }
 
 /* Update control registers */
 static int s3c_rtc_setaie(struct device *dev, unsigned int enabled)
 {
-	struct s3c_rtc *info = dev_get_drvdata(dev);
-	unsigned int tmp;
-	int ret;
+struct s3c_rtc *info = dev_get_drvdata(dev);
+unsigned int tmp;
+int ret;
 
-	dev_dbg(info->dev, "%s: aie=%d\n", __func__, enabled);
+dev_dbg(info->dev, "%s: aie=%d\n", __func__, enabled);
 
+ret = s3c_rtc_enable_clk(info);
+if (ret)
+	return ret;
+
+tmp = readb(info->base + S3C2410_RTCALM) & ~S3C2410_RTCALM_ALMEN;
+
+if (enabled)
+	tmp |= S3C2410_RTCALM_ALMEN;
+
+writeb(tmp, info->base + S3C2410_RTCALM);
+
+s3c_rtc_disable_clk(info);
+
+if (enabled) {
 	ret = s3c_rtc_enable_clk(info);
 	if (ret)
 		return ret;
-
-	tmp = readb(info->base + S3C2410_RTCALM) & ~S3C2410_RTCALM_ALMEN;
-
-	if (enabled)
-		tmp |= S3C2410_RTCALM_ALMEN;
-
-	writeb(tmp, info->base + S3C2410_RTCALM);
-
+} else {
 	s3c_rtc_disable_clk(info);
+}
 
-	if (enabled) {
-		ret = s3c_rtc_enable_clk(info);
-		if (ret)
-			return ret;
-	} else {
-		s3c_rtc_disable_clk(info);
-	}
-
-	return 0;
+return 0;
 }
 
 /* Set RTC frequency */
 static int s3c_rtc_setfreq(struct s3c_rtc *info, int freq)
 {
-	int ret;
+int ret;
 
-	if (!is_power_of_2(freq))
-		return -EINVAL;
+if (!is_power_of_2(freq))
+	return -EINVAL;
 
-	ret = s3c_rtc_enable_clk(info);
-	if (ret)
-		return ret;
-	spin_lock_irq(&info->pie_lock);
+ret = s3c_rtc_enable_clk(info);
+if (ret)
+	return ret;
+spin_lock_irq(&info->pie_lock);
 
-	if (info->data->set_freq)
-		info->data->set_freq(info, freq);
+if (info->data->set_freq)
+	info->data->set_freq(info, freq);
 
-	spin_unlock_irq(&info->pie_lock);
-	s3c_rtc_disable_clk(info);
+spin_unlock_irq(&info->pie_lock);
+s3c_rtc_disable_clk(info);
 
-	return 0;
+return 0;
 }
 
 /* Time read/write */
 static int s3c_rtc_gettime(struct device *dev, struct rtc_time *rtc_tm)
 {
-	struct s3c_rtc *info = dev_get_drvdata(dev);
-	unsigned int have_retried = 0;
-	int ret;
+struct s3c_rtc *info = dev_get_drvdata(dev);
+unsigned int have_retried = 0;
+int ret;
 
-	ret = s3c_rtc_enable_clk(info);
-	if (ret)
-		return ret;
+ret = s3c_rtc_enable_clk(info);
+if (ret)
+	return ret;
 
 retry_get_time:
-	rtc_tm->tm_min  = readb(info->base + S3C2410_RTCMIN);
-	rtc_tm->tm_hour = readb(info->base + S3C2410_RTCHOUR);
-	rtc_tm->tm_mday = readb(info->base + S3C2410_RTCDATE);
-	rtc_tm->tm_mon  = readb(info->base + S3C2410_RTCMON);
-	rtc_tm->tm_year = readw(info->base + S3C2410_RTCYEAR);
-	rtc_tm->tm_sec  = readb(info->base + S3C2410_RTCSEC);
+rtc_tm->tm_min  = readb(info->base + S3C2410_RTCMIN);
+rtc_tm->tm_hour = readb(info->base + S3C2410_RTCHOUR);
+rtc_tm->tm_mday = readb(info->base + S3C2410_RTCDATE);
+rtc_tm->tm_mon  = readb(info->base + S3C2410_RTCMON);
+rtc_tm->tm_year = readw(info->base + S3C2410_RTCYEAR);
+rtc_tm->tm_sec  = readb(info->base + S3C2410_RTCSEC);
 
-	/* the only way to work out whether the system was mid-update
-	 * when we read it is to check the second counter, and if it
-	 * is zero, then we re-try the entire read
-	 */
+/* the only way to work out whether the system was mid-update
+ * when we read it is to check the second counter, and if it
+ * is zero, then we re-try the entire read
+ */
 
-	if (rtc_tm->tm_sec == 0 && !have_retried) {
-		have_retried = 1;
-		goto retry_get_time;
-	}
+if (rtc_tm->tm_sec == 0 && !have_retried) {
+	have_retried = 1;
+	goto retry_get_time;
+}
 
-	rtc_tm->tm_sec = bcd2bin(rtc_tm->tm_sec);
-	rtc_tm->tm_min = bcd2bin(rtc_tm->tm_min);
-	rtc_tm->tm_hour = bcd2bin(rtc_tm->tm_hour);
-	rtc_tm->tm_mday = bcd2bin(rtc_tm->tm_mday);
-	rtc_tm->tm_mon = bcd2bin(rtc_tm->tm_mon);
-	rtc_tm->tm_year = bcd2bin(rtc_tm->tm_year);
+rtc_tm->tm_sec = bcd2bin(rtc_tm->tm_sec);
+rtc_tm->tm_min = bcd2bin(rtc_tm->tm_min);
+rtc_tm->tm_hour = bcd2bin(rtc_tm->tm_hour);
+rtc_tm->tm_mday = bcd2bin(rtc_tm->tm_mday);
+rtc_tm->tm_mon = bcd2bin(rtc_tm->tm_mon);
+rtc_tm->tm_year = bcd2bin(rtc_tm->tm_year);
 
-	s3c_rtc_disable_clk(info);
+s3c_rtc_disable_clk(info);
 
-	rtc_tm->tm_year += 100;
+rtc_tm->tm_year += 100;
 
-	dev_dbg(dev, "read time %04d.%02d.%02d %02d:%02d:%02d\n",
-		1900 + rtc_tm->tm_year, rtc_tm->tm_mon, rtc_tm->tm_mday,
-		rtc_tm->tm_hour, rtc_tm->tm_min, rtc_tm->tm_sec);
+dev_dbg(dev, "read time %04d.%02d.%02d %02d:%02d:%02d\n",
+	1900 + rtc_tm->tm_year, rtc_tm->tm_mon, rtc_tm->tm_mday,
+	rtc_tm->tm_hour, rtc_tm->tm_min, rtc_tm->tm_sec);
 
-	rtc_tm->tm_mon -= 1;
+rtc_tm->tm_mon -= 1;
 
-	return 0;
+return 0;
 }
 
 static int s3c_rtc_settime(struct device *dev, struct rtc_time *tm)
 {
-	struct s3c_rtc *info = dev_get_drvdata(dev);
-	int year = tm->tm_year - 100;
-	int ret;
+struct s3c_rtc *info = dev_get_drvdata(dev);
+int year = tm->tm_year - 100;
+int ret;
 
-	dev_dbg(dev, "set time %04d.%02d.%02d %02d:%02d:%02d\n",
-		1900 + tm->tm_year, tm->tm_mon, tm->tm_mday,
-		tm->tm_hour, tm->tm_min, tm->tm_sec);
+dev_dbg(dev, "set time %04d.%02d.%02d %02d:%02d:%02d\n",
+	1900 + tm->tm_year, tm->tm_mon, tm->tm_mday,
+	tm->tm_hour, tm->tm_min, tm->tm_sec);
 
-	/* we get around y2k by simply not supporting it */
+/* we get around y2k by simply not supporting it */
 
-	if (year < 0 || year >= 100) {
-		dev_err(dev, "rtc only supports 100 years\n");
-		return -EINVAL;
-	}
+if (year < 0 || year >= 100) {
+	dev_err(dev, "rtc only supports 100 years\n");
+	return -EINVAL;
+}
 
-	ret = s3c_rtc_enable_clk(info);
-	if (ret)
-		return ret;
+ret = s3c_rtc_enable_clk(info);
+if (ret)
+	return ret;
 
-	writeb(bin2bcd(tm->tm_sec),  info->base + S3C2410_RTCSEC);
-	writeb(bin2bcd(tm->tm_min),  info->base + S3C2410_RTCMIN);
-	writeb(bin2bcd(tm->tm_hour), info->base + S3C2410_RTCHOUR);
-	writeb(bin2bcd(tm->tm_mday), info->base + S3C2410_RTCDATE);
-	writeb(bin2bcd(tm->tm_mon + 1), info->base + S3C2410_RTCMON);
-	writew(bin2bcd(year), info->base + S3C2410_RTCYEAR);
+writeb(bin2bcd(tm->tm_sec),  info->base + S3C2410_RTCSEC);
+writeb(bin2bcd(tm->tm_min),  info->base + S3C2410_RTCMIN);
+writeb(bin2bcd(tm->tm_hour), info->base + S3C2410_RTCHOUR);
+writeb(bin2bcd(tm->tm_mday), info->base + S3C2410_RTCDATE);
+writeb(bin2bcd(tm->tm_mon + 1), info->base + S3C2410_RTCMON);
+writew(bin2bcd(year), info->base + S3C2410_RTCYEAR);
 
-	s3c_rtc_disable_clk(info);
+s3c_rtc_disable_clk(info);
 
-	return 0;
+return 0;
 }
 
 static int s3c_rtc_getalarm(struct device *dev, struct rtc_wkalrm *alrm)
 {
-	struct s3c_rtc *info = dev_get_drvdata(dev);
-	struct rtc_time *alm_tm = &alrm->time;
-	unsigned int alm_en;
-	int ret;
+struct s3c_rtc *info = dev_get_drvdata(dev);
+struct rtc_time *alm_tm = &alrm->time;
+unsigned int alm_en;
+int ret;
 
-	ret = s3c_rtc_enable_clk(info);
-	if (ret)
-		return ret;
+ret = s3c_rtc_enable_clk(info);
+if (ret)
+	return ret;
 
-	alm_tm->tm_sec  = readb(info->base + S3C2410_ALMSEC);
-	alm_tm->tm_min  = readb(info->base + S3C2410_ALMMIN);
-	alm_tm->tm_hour = readb(info->base + S3C2410_ALMHOUR);
-	alm_tm->tm_mon  = readb(info->base + S3C2410_ALMMON);
-	alm_tm->tm_mday = readb(info->base + S3C2410_ALMDATE);
-	alm_tm->tm_year = readw(info->base + S3C2410_ALMYEAR);
+alm_tm->tm_sec  = readb(info->base + S3C2410_ALMSEC);
+alm_tm->tm_min  = readb(info->base + S3C2410_ALMMIN);
+alm_tm->tm_hour = readb(info->base + S3C2410_ALMHOUR);
+alm_tm->tm_mon  = readb(info->base + S3C2410_ALMMON);
+alm_tm->tm_mday = readb(info->base + S3C2410_ALMDATE);
+alm_tm->tm_year = readw(info->base + S3C2410_ALMYEAR);
 
-	alm_en = readb(info->base + S3C2410_RTCALM);
+alm_en = readb(info->base + S3C2410_RTCALM);
 
-	s3c_rtc_disable_clk(info);
+s3c_rtc_disable_clk(info);
 
-	alrm->enabled = (alm_en & S3C2410_RTCALM_ALMEN) ? 1 : 0;
+alrm->enabled = (alm_en & S3C2410_RTCALM_ALMEN) ? 1 : 0;
 
-	dev_dbg(dev, "read alarm %d, %04d.%02d.%02d %02d:%02d:%02d\n",
-		alm_en,
-		1900 + alm_tm->tm_year, alm_tm->tm_mon, alm_tm->tm_mday,
-		alm_tm->tm_hour, alm_tm->tm_min, alm_tm->tm_sec);
+dev_dbg(dev, "read alarm %d, %04d.%02d.%02d %02d:%02d:%02d\n",
+	alm_en,
+	1900 + alm_tm->tm_year, alm_tm->tm_mon, alm_tm->tm_mday,
+	alm_tm->tm_hour, alm_tm->tm_min, alm_tm->tm_sec);
 
-	/* decode the alarm enable field */
-	if (alm_en & S3C2410_RTCALM_SECEN)
-		alm_tm->tm_sec = bcd2bin(alm_tm->tm_sec);
+/* decode the alarm enable field */
+if (alm_en & S3C2410_RTCALM_SECEN)
+	alm_tm->tm_sec = bcd2bin(alm_tm->tm_sec);
 
-	if (alm_en & S3C2410_RTCALM_MINEN)
-		alm_tm->tm_min = bcd2bin(alm_tm->tm_min);
+if (alm_en & S3C2410_RTCALM_MINEN)
+	alm_tm->tm_min = bcd2bin(alm_tm->tm_min);
 
-	if (alm_en & S3C2410_RTCALM_HOUREN)
-		alm_tm->tm_hour = bcd2bin(alm_tm->tm_hour);
+if (alm_en & S3C2410_RTCALM_HOUREN)
+	alm_tm->tm_hour = bcd2bin(alm_tm->tm_hour);
 
-	if (alm_en & S3C2410_RTCALM_DAYEN)
-		alm_tm->tm_mday = bcd2bin(alm_tm->tm_mday);
+if (alm_en & S3C2410_RTCALM_DAYEN)
+	alm_tm->tm_mday = bcd2bin(alm_tm->tm_mday);
 
-	if (alm_en & S3C2410_RTCALM_MONEN) {
-		alm_tm->tm_mon = bcd2bin(alm_tm->tm_mon);
-		alm_tm->tm_mon -= 1;
-	}
+if (alm_en & S3C2410_RTCALM_MONEN) {
+	alm_tm->tm_mon = bcd2bin(alm_tm->tm_mon);
+	alm_tm->tm_mon -= 1;
+}
 
-	if (alm_en & S3C2410_RTCALM_YEAREN)
-		alm_tm->tm_year = bcd2bin(alm_tm->tm_year);
+if (alm_en & S3C2410_RTCALM_YEAREN)
+	alm_tm->tm_year = bcd2bin(alm_tm->tm_year);
 
-	return 0;
+return 0;
 }
 
 static int s3c_rtc_setalarm(struct device *dev, struct rtc_wkalrm *alrm)
 {
-	struct s3c_rtc *info = dev_get_drvdata(dev);
-	struct rtc_time *tm = &alrm->time;
-	unsigned int alrm_en;
-	int ret;
-	int year = tm->tm_year - 100;
+struct s3c_rtc *info = dev_get_drvdata(dev);
+struct rtc_time *tm = &alrm->time;
+unsigned int alrm_en;
+int ret;
 
-	dev_dbg(dev, "s3c_rtc_setalarm: %d, %04d.%02d.%02d %02d:%02d:%02d\n",
-		alrm->enabled,
-		1900 + tm->tm_year, tm->tm_mon + 1, tm->tm_mday,
-		tm->tm_hour, tm->tm_min, tm->tm_sec);
+dev_dbg(dev, "s3c_rtc_setalarm: %d, %04d.%02d.%02d %02d:%02d:%02d\n",
+	alrm->enabled,
+	1900 + tm->tm_year, tm->tm_mon + 1, tm->tm_mday,
+	tm->tm_hour, tm->tm_min, tm->tm_sec);
 
-	ret = s3c_rtc_enable_clk(info);
-	if (ret)
-		return ret;
+ret = s3c_rtc_enable_clk(info);
+if (ret)
+	return ret;
 
-	alrm_en = readb(info->base + S3C2410_RTCALM) & S3C2410_RTCALM_ALMEN;
-	writeb(0x00, info->base + S3C2410_RTCALM);
+alrm_en = readb(info->base + S3C2410_RTCALM) & S3C2410_RTCALM_ALMEN;
+writeb(0x00, info->base + S3C2410_RTCALM);
 
-	if (tm->tm_sec < 60 && tm->tm_sec >= 0) {
-		alrm_en |= S3C2410_RTCALM_SECEN;
-		writeb(bin2bcd(tm->tm_sec), info->base + S3C2410_ALMSEC);
-	}
+if (tm->tm_sec < 60 && tm->tm_sec >= 0) {
+	alrm_en |= S3C2410_RTCALM_SECEN;
+	writeb(bin2bcd(tm->tm_sec), info->base + S3C2410_ALMSEC);
+}
 
-	if (tm->tm_min < 60 && tm->tm_min >= 0) {
-		alrm_en |= S3C2410_RTCALM_MINEN;
-		writeb(bin2bcd(tm->tm_min), info->base + S3C2410_ALMMIN);
-	}
+if (tm->tm_min < 60 && tm->tm_min >= 0) {
+	alrm_en |= S3C2410_RTCALM_MINEN;
+	writeb(bin2bcd(tm->tm_min), info->base + S3C2410_ALMMIN);
+}
 
-	if (tm->tm_hour < 24 && tm->tm_hour >= 0) {
-		alrm_en |= S3C2410_RTCALM_HOUREN;
-		writeb(bin2bcd(tm->tm_hour), info->base + S3C2410_ALMHOUR);
-	}
-
-	if (year < 100 && year >= 0) {
-		alrm_en |= S3C2410_RTCALM_YEAREN;
-		writew(bin2bcd(year), info->base + S3C2410_ALMYEAR);
-	}
+if (tm->tm_hour < 24 && tm->tm_hour >= 0) {
+	alrm_en |= S3C2410_RTCALM_HOUREN;
+	writeb(bin2bcd(tm->tm_hour), info->base + S3C2410_ALMHOUR);
+}
 
 	if (tm->tm_mon < 12 && tm->tm_mon >= 0) {
 		alrm_en |= S3C2410_RTCALM_MONEN;
