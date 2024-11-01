@@ -53,3 +53,4 @@ CFLAGS_genhd.o = -Wformat
 GCOV_PROFILE_blk-core.o	:=y
 obj-$(CONFIG_BLK_INLINE_ENCRYPTION)	+= keyslot-manager.o bio-crypt-ctx.o \
 					   blk-crypto.o
+obj-$(CONFIG_BLK_INLINE_ENCRYPTION_FALLBACK)	+= blk-crypto-fallback.o
