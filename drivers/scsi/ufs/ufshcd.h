@@ -353,6 +353,8 @@ struct ufs_pwr_mode_info {
 	struct ufs_pa_layer_attr info;
 };
 
+union ufs_crypto_cfg_entry;
+
 /**
  * struct ufs_hba_variant_ops - variant specific callbacks
  * @name: variant name
@@ -376,6 +378,7 @@ struct ufs_pwr_mode_info {
  * @resume: called during host controller PM callback
  * @dbg_register_dump: used to dump controller debug information
  * @phy_initialization: used to initialize phys
+ * @program_key: program an inline encryption key into a keyslot
  */
 struct ufs_hba_variant_ops {
 	const char *name;
@@ -414,6 +417,8 @@ struct ufs_hba_variant_ops {
 	int	(*crypto_sec_cfg)(struct ufs_hba *hba, bool init);
 	int	(*access_control_abort)(struct ufs_hba *hba);
 	void	(*perf_mode)(struct ufs_hba *, struct scsi_cmnd *);
+	int	(*program_key)(struct ufs_hba *hba,
+			       const union ufs_crypto_cfg_entry *cfg, int slot);
 };
 
 struct keyslot_mgmt_ll_ops;
