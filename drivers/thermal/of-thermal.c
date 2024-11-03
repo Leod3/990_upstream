@@ -992,6 +992,8 @@ int __init of_parse_thermal_zones(void)
 
 		if (!of_property_read_string(child, "governor", &governor_name))
 			strncpy(tzp->governor_name, governor_name, THERMAL_NAME_LENGTH);
+		if (of_property_read_bool(child, "tracks-low"))
+			tzp->tracks_low = true;
 
 		zone = thermal_zone_device_register(child->name, tz->ntrips,
 						    mask, tz,
