@@ -768,6 +768,13 @@ struct task_struct {
 #ifdef CONFIG_SCHED_USE_FLUID_RT
 	int victim_flag;
 #endif
+
+	/* task boost vendor fields */
+	u64				last_sleep_ts;
+	int				boost;
+	u64				boost_period;
+	u64				boost_expires;
+
 #ifdef CONFIG_CGROUP_SCHED
 	struct task_group		*sched_task_group;
 #endif
