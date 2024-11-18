@@ -20,21 +20,107 @@ static LIST_HEAD(device_list);
 static DEFINE_MUTEX(device_list_lock);
 
 static const struct of_device_id gw9558_of_match[] = {
-#ifndef CONFIG_SEC_FACTORY
 	{ .compatible = "goodix,gw9558x", },
-#else
-	{ .compatible = "goodix,gw9558x_factory", },
-#endif
 	{},
 };
 MODULE_DEVICE_TABLE(of, gw9558_of_match);
 
-extern int fingerprint_register(struct device *dev, void *drvdata,
-	struct device_attribute *attributes[], char *name);
-extern void fingerprint_unregister(struct device *dev,
-	struct device_attribute *attributes[]);
+struct debug_logger *g_logger;
 
-static struct gf_device *g_data;
+static ssize_t bfs_values_show(struct device *dev,
+				      struct device_attribute *attr, char *buf)
+{
+	struct gf_device *gf_dev = dev_get_drvdata(dev);
+
+	return snprintf(buf, PAGE_SIZE, "\"FP_SPICLK\":\"%d\"\n",
+			gf_dev->clk_setting->spi_speed);
+}
+
+static ssize_t type_check_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct gf_device *gf_dev = dev_get_drvdata(dev);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", gf_dev->sensortype);
+}
+
+static ssize_t vendor_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%s\n", "GOODIX");
+}
+
+static ssize_t name_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct gf_device *gf_dev = dev_get_drvdata(dev);
+
+	return snprintf(buf, PAGE_SIZE, "%s\n", gf_dev->chipid);
+}
+
+static ssize_t adm_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%d\n", DETECT_ADM);
+}
+
+static ssize_t resetcnt_show(struct device *dev,
+			       struct device_attribute *attr, char *buf)
+{
+	struct gf_device *gf_dev = dev_get_drvdata(dev);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", gf_dev->reset_count);
+}
+
+static ssize_t resetcnt_store(struct device *dev,
+				struct device_attribute *attr, const char *buf,
+				size_t size)
+{
+	struct gf_device *gf_dev = dev_get_drvdata(dev);
+
+	if (sysfs_streq(buf, "c")) {
+		gf_dev->reset_count = 0;
+		pr_info("initialization is done\n");
+	}
+	return size;
+}
+
+static ssize_t position_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct gf_device *gf_dev = dev_get_drvdata(dev);
+
+	return snprintf(buf, PAGE_SIZE, "%s\n", gf_dev->sensor_position);
+}
+
+static ssize_t rb_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct gf_device *gf_dev = dev_get_drvdata(dev);
+
+	return snprintf(buf, PAGE_SIZE, "%s\n", gf_dev->rb);
+}
+
+static DEVICE_ATTR_RO(bfs_values);
+static DEVICE_ATTR_RO(type_check);
+static DEVICE_ATTR_RO(vendor);
+static DEVICE_ATTR_RO(name);
+static DEVICE_ATTR_RO(adm);
+static DEVICE_ATTR_RW(resetcnt);
+static DEVICE_ATTR_RO(position);
+static DEVICE_ATTR_RO(rb);
+
+static struct device_attribute *fp_attrs[] = {
+	&dev_attr_bfs_values,
+	&dev_attr_type_check,
+	&dev_attr_vendor,
+	&dev_attr_name,
+	&dev_attr_adm,
+	&dev_attr_resetcnt,
+	&dev_attr_position,
+	&dev_attr_rb,
+	NULL,
+};
 
 static ssize_t gw9558_read(struct file *filp, char __user *buf,
 		size_t count, loff_t *f_pos)
@@ -58,28 +144,17 @@ static long gw9558_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	if (_IOC_TYPE(cmd) != GF_IOC_MAGIC)
 		return -EINVAL;
 
-	/* Check access direction once here; don't repeat below.
-	 * IOC_DIR is from the user perspective, while access_ok is
-	 * from the kernel perspective; so they look reversed.
-	 */
-	if (_IOC_DIR(cmd) & _IOC_READ)
-		retval = !access_ok(VERIFY_WRITE, (void __user *)arg,
-				_IOC_SIZE(cmd));
+	if (!filp || !filp->private_data) {
+		pr_err("NULL pointer passed\n");
+		return -EINVAL;
+	}
 
-	if (retval == 0 && _IOC_DIR(cmd) & _IOC_WRITE)
-		retval = !access_ok(VERIFY_READ, (void __user *)arg,
-				_IOC_SIZE(cmd));
-
-	if (retval) {
-		pr_err("access NOK\n");
+	if (IS_ERR((void __user *)arg)) {
+		pr_err("invalid user space pointer %lu\n", arg);
 		return -EINVAL;
 	}
 
 	gf_dev = (struct gf_device *)filp->private_data;
-	if (!gf_dev) {
-		pr_err("gf_dev IS NULL\n");
-		return -EINVAL;
-	}
 
 	switch (cmd) {
 	case GF_IOC_INIT:
@@ -99,13 +174,13 @@ static long gw9558_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			pr_err("Failed to copy spi_speed value from user to kernel\n");
 		}
 		pr_info("GF_IOC_ENABLE_SPI_CLK : %d, fromUser : %d\n",
-				gf_dev->spi_speed, onoff);
-		gw9558_spi_clk_enable(gf_dev);
+				gf_dev->clk_setting->spi_speed, onoff);
+		spi_clk_enable(gf_dev->clk_setting);
 		break;
 
 	case GF_IOC_DISABLE_SPI_CLK:
 		pr_info("GF_IOC_DISABLE_SPI_CLK\n");
-		gw9558_spi_clk_disable(gf_dev);
+		spi_clk_disable(gf_dev->clk_setting);
 		break;
 
 	case GF_IOC_ENABLE_POWER:
@@ -153,19 +228,7 @@ static long gw9558_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			pr_err("Failed to copy sensor type from user to kernel\n");
 			return -EFAULT;
 		}
-		if ((int)onoff >= SENSOR_OOO && (int)onoff < SENSOR_MAXIMUM) {
-			if ((int)onoff == SENSOR_OOO && gf_dev->sensortype == SENSOR_FAILED) {
-				pr_err("Maintain type check from out of oder :%s\n",
-					sensor_status[gf_dev->sensortype + 2]);
-			} else {
-				gf_dev->sensortype = (int)onoff;
-				pr_info("SET_SENSOR_TYPE :%s\n",
-					sensor_status[gf_dev->sensortype + 2]);
-			}
-		} else {
-			pr_err("SET_SENSOR_TYPE : invalid value %d\n", (int)onoff);
-			gf_dev->sensortype = SENSOR_UNKNOWN;
-		}
+		set_sensor_type((int)onoff, &gf_dev->sensortype);
 		break;
 #endif
 	case GF_IOC_SPEEDUP:
@@ -174,7 +237,10 @@ static long gw9558_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			pr_err("Failed to copy speedup from user to kernel\n");
 			return -EFAULT;
 		}
-		retval = gw9558_set_cpu_speedup(gf_dev, onoff);
+		if (onoff)
+			retval = cpu_speedup_enable(gf_dev->boosting);
+		else
+			retval = cpu_speedup_disable(gf_dev->boosting);
 		break;
 
 	case GF_MODEL_INFO:
@@ -235,7 +301,7 @@ static int gw9558_open(struct inode *inode, struct file *filp)
 		nonseekable_open(inode, filp);
 		pr_info("Success to open device\n");
 	} else {
-		pr_err("No device for minor %d\n",iminor(inode));
+		pr_err("No device for minor %d\n", iminor(inode));
 	}
 	return retval;
 }
@@ -250,15 +316,15 @@ static int gw9558_release(struct inode *inode, struct file *filp)
 }
 
 static const struct file_operations gw9558_fops = {
-	.owner =	THIS_MODULE,
-	.write =	gw9558_write,
-	.read =		gw9558_read,
+	.owner = THIS_MODULE,
+	.write = gw9558_write,
+	.read = gw9558_read,
 	.unlocked_ioctl = gw9558_ioctl,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl = gw9558_compat_ioctl,
 #endif
-	.open =		gw9558_open,
-	.release =	gw9558_release,
+	.open = gw9558_open,
+	.release = gw9558_release,
 };
 
 #if defined(ENABLE_SENSORS_FPRINT_SECURE)
@@ -275,55 +341,43 @@ int fps_resume_set(void) {
 
 static void gw9558_work_func_debug(struct work_struct *work)
 {
-	struct gf_device *gf_dev = NULL;
 	u8 rst_value = -1;
+	struct debug_logger *logger;
+	struct gf_device *gf_dev;
 
-	gf_dev = container_of(work, struct gf_device, work_debug);
+	logger = container_of(work, struct debug_logger, work_debug);
+	gf_dev = dev_get_drvdata(logger->dev);
 	if (gf_dev->reset_gpio)
 		rst_value = gpio_get_value(gf_dev->reset_gpio);
 
 	pr_info("ldo: %d, sleep: %d, tz: %d type: %s\n",
 		gf_dev->ldo_onoff, rst_value, gf_dev->tz_mode,
-		sensor_status[gf_dev->sensortype + 2]);
+		gf_dev->sensortype > 0 ? gf_dev->chipid : sensor_status[gf_dev->sensortype + 2]);
 }
 
-static void gw9558_enable_debug_timer(struct gf_device *gf_dev)
+int gw9558_pin_control(struct gf_device *gf_dev, bool pin_set)
 {
-	mod_timer(&g_data->dbg_timer,
-		round_jiffies_up(jiffies + FPSENSOR_DEBUG_TIMER_SEC));
-}
+	int retval = 0;
 
-static void gw9558_disable_debug_timer(struct gf_device *gf_dev)
-{
-	del_timer_sync(&g_data->dbg_timer);
-	cancel_work_sync(&g_data->work_debug);
-}
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0)
-static void gw9558_timer_func(unsigned long ptr)
-#else
-static void gw9558_timer_func(struct timer_list *t)
-#endif
-{
-	queue_work(g_data->wq_dbg, &g_data->work_debug);
-	mod_timer(&g_data->dbg_timer,
-		round_jiffies_up(jiffies + FPSENSOR_DEBUG_TIMER_SEC));
-}
-
-static int gw9558_set_timer(struct gf_device *gf_dev)
-{
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 14, 0)
-	setup_timer(&gf_dev->dbg_timer, gw9558_timer_func, (unsigned long)gf_dev);
-#else
-	timer_setup(&gf_dev->dbg_timer, gw9558_timer_func, 0);
-#endif
-	gf_dev->wq_dbg = create_singlethread_workqueue("gw9558_debug_wq");
-	if (!gf_dev->wq_dbg) {
-		pr_err("could not create workqueue\n");
-		return -ENOMEM;
+#ifndef ENABLE_SENSORS_FPRINT_SECURE
+	if (pin_set) {
+		if (!IS_ERR(gf_dev->pins_poweron)) {
+			retval = pinctrl_select_state(gf_dev->p, gf_dev->pins_poweron);
+			if (retval)
+				pr_err("can't set pin wakeup state\n");
+			pr_debug("idle\n");
+		}
+	} else {
+		if (!IS_ERR(gf_dev->pins_poweroff)) {
+			retval = pinctrl_select_state(gf_dev->p, gf_dev->pins_poweroff);
+			if (retval)
+				pr_err("can't set pin sleep state\n");
+			pr_debug("sleep\n");
+		}
 	}
-	INIT_WORK(&gf_dev->work_debug, gw9558_work_func_debug);
-	return 0;
+#endif
+
+	return retval;
 }
 
 void gw9558_hw_power_enable(struct gf_device *gf_dev, u8 onoff)
@@ -381,7 +435,7 @@ void gw9558_hw_reset(struct gf_device *gf_dev, u8 delay)
 		gpio_set_value(gf_dev->reset_gpio, 0);
 		usleep_range(3000, 3050);
 		gpio_set_value(gf_dev->reset_gpio, 1);
-		usleep_range(delay * 1000, delay * 1000 + 50);
+		usleep_range((delay * 1000), (delay * 1000) + 50);
 		gf_dev->reset_count++;
 	}
 }
@@ -412,29 +466,33 @@ int gw9558_get_gpio_dts_info(struct device *dev, struct gf_device *gf_dev)
 		gf_dev->btp_vdd = NULL;
 	} else {
 		gf_dev->regulator_3p3 = regulator_get(NULL, gf_dev->btp_vdd);
-		if (IS_ERR(gf_dev->regulator_3p3) || (gf_dev->regulator_3p3) == NULL) {
-			pr_info("not use regulator_3p3\n");
-			gf_dev->regulator_3p3 = NULL;
-		} else {
-			pr_info("btp_regulator ok\n");
+		if ((gf_dev->regulator_3p3) == NULL) {
+			pr_info("fail to get regulator_3p3\n");
+			return -EINVAL;
+		} else if (IS_ERR(gf_dev->regulator_3p3)) {
+			pr_info("fail to get regulator_3p3: %ld", PTR_ERR(gf_dev->regulator_3p3));
+			return PTR_ERR(gf_dev->regulator_3p3);
 		}
+		pr_info("btp_regulator ok\n");
 	}
 
     /* get reset resource */
 	gf_dev->reset_gpio = of_get_named_gpio(np, "goodix,gpio_reset", 0);
 	if (!gpio_is_valid(gf_dev->reset_gpio)) {
 		pr_err("RESET GPIO is invalid.\n");
-		gf_dev->reset_gpio = 0;
-		return -EINVAL;
-	} else {
-		pr_info("goodix_reset:%d\n", gf_dev->reset_gpio);
-		retval = gpio_request(gf_dev->reset_gpio, "goodix_reset");
-		if (retval < 0) {
-			pr_err("Failed to request RESET GPIO = %d\n", retval);
-			return retval;
-		}
-		gpio_direction_output(gf_dev->reset_gpio, 0);
+		return gf_dev->reset_gpio;
 	}
+	pr_info("goodix_reset:%d\n", gf_dev->reset_gpio);
+	retval = gpio_request(gf_dev->reset_gpio, "goodix_reset");
+	if (retval < 0) {
+		pr_err("Failed to request RESET GPIO = %d\n", retval);
+		return retval;
+	}
+	gpio_direction_output(gf_dev->reset_gpio, 0);
+
+	if (of_property_read_u32(np, "goodix,min_cpufreq_limit",
+			&gf_dev->boosting->min_cpufreq_limit))
+		gf_dev->boosting->min_cpufreq_limit = 0;
 
 	if (of_property_read_string_index(np, "goodix,chip_id", 0,
 			(const char **)&gf_dev->chipid))
@@ -462,7 +520,7 @@ int gw9558_get_gpio_dts_info(struct device *dev, struct gf_device *gf_dev)
 	gf_dev->p = pinctrl_get_select_default(dev);
 	if (IS_ERR(gf_dev->p)) {
 		pr_err("failed pinctrl_get\n");
-		return -EINVAL;
+		return PTR_ERR(gf_dev->p);
 	}
 #ifndef ENABLE_SENSORS_FPRINT_SECURE
 	gf_dev->pins_poweroff = pinctrl_lookup_state(gf_dev->p, "pins_poweroff");
@@ -500,32 +558,40 @@ void gw9558_cleanup_info(struct gf_device *gf_dev)
 int gw9558_type_check(struct gf_device *gf_dev)
 {
 	int retval = -ENODEV;
-	unsigned char mcuid[4] = {0x00, 0x00, 0x00, 0x00};
+	unsigned char mcuid[2] = {0x00, 0x00};
 	u32 mcuid32 = 0;
+#if defined(CONFIG_SENSORS_FINGERPRINT_NORMALSPI)
+	unsigned char wake_wp_0[4] = {0x00, 0x01, 0x00, 0x00};
+	unsigned char spi_mode[4] =  {0x00, 0x01, 0x00, 0x11};
+#endif
 
 	gw9558_hw_power_enable(gf_dev, 1);
 	usleep_range(4950, 5000);
-	gw9558_hw_reset(gf_dev, 50);
-
-	gw9558_spi_read_bytes(gf_dev, 0x0000, 4, mcuid);
-	mcuid32 = (mcuid[2] << 24 | mcuid[3] << 16 |
-			mcuid[0] << 8 | mcuid[1]);
-	pr_info("Sensor read : %x %x %x %x\n",
-			mcuid[0], mcuid[1], mcuid[2], mcuid[3]);
-	pr_info("Sensor read : 0x%8x\n", mcuid32);
+#if defined(CONFIG_SENSORS_FINGERPRINT_NORMALSPI)
+	gw9558_spi_write_bytes(gf_dev, 0xe500, 4, wake_wp_0);
+	usleep_range(1000, 1050);
+	gw9558_spi_write_bytes(gf_dev, 0x0022, 4, spi_mode);
+	usleep_range(1000, 1050);
+#endif
+	gw9558_spi_read_bytes(gf_dev, 0x0000, 2, mcuid);
+	mcuid32 = mcuid[0] << 8 | mcuid[1];
+	pr_info("Sensor read : %x %x\n", mcuid[0], mcuid[1]);
+	pr_info("Sensor read : 0x%4x\n", mcuid32);
 	if (mcuid32 == G3_MCU_ID) {
-		gf_dev->sensortype = SENSOR_GOODIXOPTICAL;
-		pr_info("sensor type is G3 %s\n",
-				sensor_status[gf_dev->sensortype + 2]);
+		gf_dev->sensortype = SENSOR_OK;
+		pr_info("sensor type is G3 %s\n", gf_dev->chipid);
 		retval = 0;
 	} else if (mcuid32 == GX_MCU_ID) {
-		gf_dev->sensortype = SENSOR_GOODIXOPTICAL;
-		pr_info("sensor type is G3X %s\n",
-				sensor_status[gf_dev->sensortype + 2]);
+		gf_dev->sensortype = SENSOR_OK;
+		pr_info("sensor type is GX %s\n", gf_dev->chipid);
+		retval = 0;
+	} else if (mcuid32 == G3S_MCU_ID) {
+		gf_dev->sensortype = SENSOR_OK;
+		pr_info("sensor type is G3S %s\n", gf_dev->chipid);
 		retval = 0;
 	} else {
 		gf_dev->sensortype = SENSOR_FAILED;
-		pr_err("sensor type is FAILED 0x%8x\n", mcuid32);
+		pr_err("sensor type is FAILED 0x%4x\n", mcuid32);
 	}
 	gw9558_hw_power_enable(gf_dev, 0);
 
@@ -533,123 +599,28 @@ int gw9558_type_check(struct gf_device *gf_dev)
 }
 #endif
 
-static ssize_t gw9558_bfs_values_show(struct device *dev,
-				      struct device_attribute *attr, char *buf)
+static struct gf_device *alloc_platformdata(struct device *dev)
 {
-	struct gf_device *gf_dev = dev_get_drvdata(dev);
+	struct gf_device *gf_dev;
 
-	return snprintf(buf, PAGE_SIZE, "\"FP_SPICLK\":\"%d\"\n",
-			gf_dev->spi_speed);
+	gf_dev = devm_kzalloc(dev, sizeof(struct gf_device), GFP_KERNEL);
+	if (gf_dev == NULL)
+		return NULL;
+
+	gf_dev->clk_setting = devm_kzalloc(dev, sizeof(*gf_dev->clk_setting), GFP_KERNEL);
+	if (gf_dev->clk_setting == NULL)
+		return NULL;
+
+	gf_dev->boosting = devm_kzalloc(dev, sizeof(*gf_dev->boosting), GFP_KERNEL);
+	if (gf_dev->boosting == NULL)
+		return NULL;
+
+	gf_dev->logger = devm_kzalloc(dev, sizeof(*gf_dev->logger), GFP_KERNEL);
+	if (gf_dev->logger == NULL)
+		return NULL;
+
+	return gf_dev;
 }
-
-static ssize_t gw9558_type_check_show(struct device *dev,
-				struct device_attribute *attr, char *buf)
-{
-	struct gf_device *gf_dev = dev_get_drvdata(dev);
-
-	return snprintf(buf, PAGE_SIZE, "%d\n", gf_dev->sensortype);
-}
-
-static ssize_t gw9558_vendor_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	return snprintf(buf, PAGE_SIZE, "%s\n", "GOODIX");
-}
-
-static ssize_t gw9558_name_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	struct gf_device *gf_dev = dev_get_drvdata(dev);
-
-	return snprintf(buf, PAGE_SIZE, "%s\n", gf_dev->chipid);
-}
-
-static ssize_t gw9558_adm_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	return snprintf(buf, PAGE_SIZE, "%d\n", DETECT_ADM);
-}
-
-static ssize_t gw9558_intcnt_show(struct device *dev,
-			       struct device_attribute *attr, char *buf)
-{
-	struct gf_device *gf_dev = dev_get_drvdata(dev);
-
-	return snprintf(buf, PAGE_SIZE, "%d\n", gf_dev->interrupt_count);
-}
-
-static ssize_t gw9558_intcnt_store(struct device *dev,
-				struct device_attribute *attr, const char *buf,
-				size_t size)
-{
-	struct gf_device *gf_dev = dev_get_drvdata(dev);
-
-	if (sysfs_streq(buf, "c")) {
-		gf_dev->interrupt_count = 0;
-		pr_info("initialization is done\n");
-	}
-	return size;
-}
-
-static ssize_t gw9558_resetcnt_show(struct device *dev,
-			       struct device_attribute *attr, char *buf)
-{
-	struct gf_device *gf_dev = dev_get_drvdata(dev);
-
-	return snprintf(buf, PAGE_SIZE, "%d\n", gf_dev->reset_count);
-}
-
-static ssize_t gw9558_resetcnt_store(struct device *dev,
-				struct device_attribute *attr, const char *buf,
-				size_t size)
-{
-	struct gf_device *gf_dev = dev_get_drvdata(dev);
-
-	if (sysfs_streq(buf, "c")) {
-		gf_dev->reset_count = 0;
-		pr_info("initialization is done\n");
-	}
-	return size;
-}
-
-static ssize_t gw9558_position_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	struct gf_device *gf_dev = dev_get_drvdata(dev);
-
-	return snprintf(buf, PAGE_SIZE, "%s\n", gf_dev->sensor_position);
-}
-
-static ssize_t gw9558_rb_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	struct gf_device *gf_dev = dev_get_drvdata(dev);
-
-	return snprintf(buf, PAGE_SIZE, "%s\n", gf_dev->rb);
-}
-
-static DEVICE_ATTR(bfs_values, 0444, gw9558_bfs_values_show, NULL);
-static DEVICE_ATTR(type_check, 0444, gw9558_type_check_show, NULL);
-static DEVICE_ATTR(vendor, 0444,	gw9558_vendor_show, NULL);
-static DEVICE_ATTR(name, 0444, gw9558_name_show, NULL);
-static DEVICE_ATTR(adm, 0444, gw9558_adm_show, NULL);
-static DEVICE_ATTR(intcnt, 0664, gw9558_intcnt_show, gw9558_intcnt_store);
-static DEVICE_ATTR(resetcnt, 0664, gw9558_resetcnt_show, gw9558_resetcnt_store);
-static DEVICE_ATTR(position, 0444, gw9558_position_show, NULL);
-static DEVICE_ATTR(rb, 0444, gw9558_rb_show, NULL);
-
-static struct device_attribute *fp_attrs[] = {
-	&dev_attr_bfs_values,
-	&dev_attr_type_check,
-	&dev_attr_vendor,
-	&dev_attr_name,
-	&dev_attr_adm,
-	&dev_attr_intcnt,
-	&dev_attr_resetcnt,
-	&dev_attr_position,
-	&dev_attr_rb,
-	NULL,
-};
 
 static int gw9558_probe_common(struct device *dev, struct gf_device *gf_dev)
 {
@@ -666,8 +637,9 @@ static int gw9558_probe_common(struct device *dev, struct gf_device *gf_dev)
 	gf_dev->device_count = 0;
 	gf_dev->ldo_onoff = 0;
 	gf_dev->reset_count = 0;
-	gf_dev->interrupt_count = 0;
-	g_data = gf_dev;
+	gf_dev->dev = dev;
+	gf_dev->logger->dev = dev;
+	dev_set_drvdata(dev, gf_dev);
 
 	/* get gpio info from dts or defination */
 	retval = gw9558_get_gpio_dts_info(dev, gf_dev);
@@ -675,13 +647,15 @@ static int gw9558_probe_common(struct device *dev, struct gf_device *gf_dev)
 		pr_err("Failed to get gpio info:%d\n", retval);
 		goto gw9558_probe_get_gpio;
 	}
+#ifndef ENABLE_SENSORS_FPRINT_SECURE
 	gw9558_spi_setup_conf(gf_dev, 1);
+#endif
 
 	/* set AP spectific configuration */
-	retval = gw9558_register_platform_variable(gf_dev);
+	retval = spi_clk_register(gf_dev->clk_setting, dev);
 	if (retval < 0) {
-		pr_err("Failed to set platform_variable:%d\n", retval);
-		goto gw9558_probe_set_platform;
+		pr_err("Failed to register spi clk:%d\n", retval);
+		goto gw9558_probe_spi_clk_register;
 	}
 	/* create class */
 	gf_dev->class = class_create(THIS_MODULE, GF_CLASS_NAME);
@@ -748,12 +722,25 @@ static int gw9558_probe_common(struct device *dev, struct gf_device *gf_dev)
 		goto gw9558_probe_cdev;
 	}
 
-	wake_lock_init(&gf_dev->wake_lock, WAKE_LOCK_SUSPEND, "gw9558_wake_lock");
+#if KERNEL_VERSION(4, 19, 188) > LINUX_VERSION_CODE
+	/* 4.19 R */
+	//wakeup_source_init(gf_dev->clk_setting->spi_wake_lock, "gw9558_wake_lock");
+	/* 4.19 Q */
+	if (!(gf_dev->clk_setting->spi_wake_lock)) {
+		gf_dev->clk_setting->spi_wake_lock = wakeup_source_create("gw9558_wake_lock");
+		if (gf_dev->clk_setting->spi_wake_lock)
+			wakeup_source_add(gf_dev->clk_setting->spi_wake_lock);
+	}
+#else
+	/* 5.4 R */
+	gf_dev->clk_setting->spi_wake_lock = wakeup_source_register(gf_dev->dev, "gw9558_wake_lock");
+#endif
 
-	retval = gw9558_set_timer(gf_dev);
+	g_logger = gf_dev->logger;
+	retval = set_fp_debug_timer(gf_dev->logger, gw9558_work_func_debug);
 	if (retval)
 		goto gw9558_probe_debug_timer;
-	gw9558_enable_debug_timer(gf_dev);
+	enable_fp_debug_timer(gf_dev->logger);
 
 	pr_info("probe finished\n");
 	return 0;
@@ -770,9 +757,9 @@ gw9558_probe_device:
 gw9558_probe_devno:
 	class_destroy(gf_dev->class);
 gw9558_probe_class_create:
-gw9558_probe_set_platform:
+	spi_clk_unregister(gf_dev->clk_setting);
+gw9558_probe_spi_clk_register:
 gw9558_probe_get_gpio:
-	gw9558_unregister_platform_variable(gf_dev);
 	pr_err("failed. %d", retval);
 	return retval;
 }
@@ -780,58 +767,57 @@ gw9558_probe_get_gpio:
 #ifdef ENABLE_SENSORS_FPRINT_SECURE
 static int gw9558_probe(struct platform_device *pdev)
 {
-	int retval = 0;
+	int retval = -ENOMEM;
 	struct gf_device *gf_dev;
 
 	pr_info("platform_driver Entry\n");
-	/* Allocate driver data */
-	gf_dev = kzalloc(sizeof(struct gf_device), GFP_KERNEL);
-	if (!gf_dev)
-		return -ENOMEM;
 
-	gf_dev->enabled_clk = 0;
+	gf_dev = alloc_platformdata(&pdev->dev);
+	if (gf_dev == NULL)
+		goto gw9558_platform_alloc_failed;
+
+	gf_dev->clk_setting->enabled_clk = false;
 	gf_dev->tz_mode = true;
 	gf_dev->sensortype = SENSOR_UNKNOWN;
-	gf_dev->spi_speed = GW9558_SPI_BAUD_RATE;
+	gf_dev->clk_setting->spi_speed = (unsigned int)GW9558_SPI_BAUD_RATE;
 
 	retval = gw9558_probe_common(&pdev->dev, gf_dev);
-	if(retval)
+	if (retval)
 		goto gw9558_platform_probe_failed;
 
 	pr_info("is successful\n");
 	return retval;
 
 gw9558_platform_probe_failed:
-	kfree(gf_dev);
 	gf_dev = NULL;
+gw9558_platform_alloc_failed:
 	pr_err("is failed : %d\n", retval);
 	return retval;
 }
 #else
 static int gw9558_probe(struct spi_device *spi)
 {
-	int retval = 0;
-	struct gf_device *gf_dev;
+	int retval = -ENOMEM;
+	struct gf_device *gf_dev = NULL;
 
 	pr_info("spi_driver Entry\n");
-	/* Allocate driver data */
-	gf_dev = kzalloc(sizeof(struct gf_device), GFP_KERNEL);
-	if (!gf_dev)
-		return -ENOMEM;
+
+	gf_dev = alloc_platformdata(&spi->dev);
+	if (gf_dev == NULL)
+		goto gw9558_spi_probe_alloc_failed;
 
 	spi->mode = SPI_MODE_0;
-	spi->max_speed_hz = GW9558_SPI_BAUD_RATE;
+	spi->max_speed_hz = (unsigned int)GW9558_SPI_BAUD_RATE;
 	spi->bits_per_word = 8;
-	gf_dev->spi_speed = GW9558_SPI_BAUD_RATE;
+	gf_dev->clk_setting->spi_speed = (unsigned int)GW9558_SPI_BAUD_RATE;
 	gf_dev->prev_bits_per_word = 8;
 	gf_dev->tz_mode = false;
 	gf_dev->spi = spi;
-	spi_set_drvdata(spi, gf_dev);
 	mutex_init(&gf_dev->buf_lock);
 
 	if (spi_setup(gf_dev->spi)) {
 		pr_err("failed to setup spi conf\n");
-		goto gw9558_spi_probe_spi_setup;
+		goto gw9558_spi_spi_setup_failed;
 	} else {
 		pr_info("setup spi success.\n");
 	}
@@ -840,11 +826,11 @@ static int gw9558_probe(struct spi_device *spi)
 	retval = gw9558_init_buffer(gf_dev);
 	if (retval < 0) {
 		pr_err("Failed to Init transfer buffer.\n");
-		goto gw9558_spi_probe_transfer_buffer_init;
+		goto gw9558_spi_init_buffer_failed;
 	}
 
 	retval = gw9558_probe_common(&spi->dev, gf_dev);
-	if(retval)
+	if (retval)
 		goto gw9558_spi_probe_failed;
 
 	pr_info("is successful\n");
@@ -852,13 +838,11 @@ static int gw9558_probe(struct spi_device *spi)
 
 gw9558_spi_probe_failed:
 	gw9558_free_buffer(gf_dev);
-gw9558_spi_probe_transfer_buffer_init:
-gw9558_spi_probe_spi_setup:
+gw9558_spi_init_buffer_failed:
+gw9558_spi_spi_setup_failed:
 	mutex_destroy(&gf_dev->buf_lock);
-	spi_set_drvdata(spi, NULL);
-	gf_dev->spi = NULL;
-	kfree(gf_dev);
 	gf_dev = NULL;
+gw9558_spi_probe_alloc_failed:
 	pr_err("is failed : %d\n", retval);
 	return retval;
 }
@@ -871,9 +855,9 @@ static int gw9558_remove_common(struct device *dev)
 	pr_info("Entry\n");
 
 	gw9558_hw_power_enable(gf_dev, 0);
-	gw9558_unregister_platform_variable(gf_dev);
-	gw9558_disable_debug_timer(gf_dev);
-	wake_lock_destroy(&gf_dev->wake_lock);
+	spi_clk_unregister(gf_dev->clk_setting);
+	disable_fp_debug_timer(gf_dev->logger);
+	wakeup_source_unregister(gf_dev->clk_setting->spi_wake_lock);
 	gw9558_cleanup_info(gf_dev);
 	fingerprint_unregister(gf_dev->fp_device, fp_attrs);
 	cdev_del(&gf_dev->cdev);
@@ -888,13 +872,26 @@ static int gw9558_remove_common(struct device *dev)
 #ifdef ENABLE_SENSORS_FPRINT_SECURE
 static int gw9558_remove(struct platform_device *pdev)
 {
-	struct gf_device *gf_dev = dev_get_drvdata(&pdev->dev);
+	struct gf_device *gf_dev = platform_get_drvdata(pdev);
 
 	gw9558_remove_common(&pdev->dev);
-
-	kfree(gf_dev);
 	gf_dev = NULL;
 	return 0;
+}
+#else
+#if LINUX_VERSION_CODE > KERNEL_VERSION(6, 1, 0)
+static void gw9558_remove(struct spi_device *spi)
+{
+	struct gf_device *gf_dev = spi_get_drvdata(spi);
+
+	gw9558_free_buffer(gf_dev);
+	gw9558_remove_common(&spi->dev);
+
+	mutex_destroy(&gf_dev->buf_lock);
+	spin_lock_irq(&gf_dev->spi_lock);
+	gf_dev->spi = NULL;
+	spin_unlock_irq(&gf_dev->spi_lock);
+	gf_dev = NULL;
 }
 #else
 static int gw9558_remove(struct spi_device *spi)
@@ -906,13 +903,12 @@ static int gw9558_remove(struct spi_device *spi)
 
 	mutex_destroy(&gf_dev->buf_lock);
 	spin_lock_irq(&gf_dev->spi_lock);
-	spi_set_drvdata(spi, NULL);
 	gf_dev->spi = NULL;
 	spin_unlock_irq(&gf_dev->spi_lock);
-	kfree(gf_dev);
 	gf_dev = NULL;
 	return 0;
 }
+#endif
 #endif
 
 static int gw9558_pm_suspend(struct device *dev)
@@ -920,7 +916,7 @@ static int gw9558_pm_suspend(struct device *dev)
 	struct gf_device *gf_dev = dev_get_drvdata(dev);
 
 	pr_info("Entry\n");
-	gw9558_disable_debug_timer(gf_dev);
+	disable_fp_debug_timer(gf_dev->logger);
 	return 0;
 }
 
@@ -929,7 +925,7 @@ static int gw9558_pm_resume(struct device *dev)
 	struct gf_device *gf_dev = dev_get_drvdata(dev);
 
 	pr_info("Entry\n");
-	gw9558_enable_debug_timer(gf_dev);
+	enable_fp_debug_timer(gf_dev->logger);
 	return 0;
 }
 
@@ -945,9 +941,9 @@ static struct platform_driver gw9558_spi_driver = {
 #endif
 	.driver = {
 		.name = GF_DEV_NAME,
-/*#ifndef ENABLE_SENSORS_FPRINT_SECURE
+#ifndef ENABLE_SENSORS_FPRINT_SECURE
 		.bus = &spi_bus_type,
-#endif*/
+#endif
 		.owner = THIS_MODULE,
 		.pm = &gw9558_pm_ops,
 		.of_match_table = gw9558_of_match,
