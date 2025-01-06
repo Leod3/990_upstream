@@ -1,0 +1,28 @@
+# A simple action usage
+name: Build Kernel
+on:
+  workflow_dispatch:
+
+jobs:
+  Build-Kernel:
+    strategy:
+      fail-fast: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+    - name: Build Kernel
+      uses: Leod3/kernel_build_action@main
+      with:
+          kernel-url: https://github.com/Leod3/990_upstream.git
+          kernel-dir: lineage-22
+          kernel-branch: lineage-22
+          config: exynos9830-r8slte_defconfig
+          arch: arm64
+          aosp-gcc: true
+          aosp-clang: true
+          ksu: true
+          android-version: 12
+          aosp-clang-version: r416183b1
+          anykernel3: true
