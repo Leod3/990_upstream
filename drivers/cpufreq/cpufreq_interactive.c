@@ -81,10 +81,8 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 #ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE
 static
 #endif
-struct cpufreq_governor cpufreq_interactive = {
+struct cpufreq_governor cpufreq_gov_interactive = {
 	.name = "interactive",
-	.governor = cpufreq_interactive,
-	.max_transition_latency = 10000000,
 	.owner = THIS_MODULE,
 };
 
@@ -126,7 +124,7 @@ static void cpufreq_interactive_timer(unsigned long data)
 	if (!idle_exit_time)
 		goto exit;
 
-	delta_idle = (unsigned int) cputime64_sub(now_idle, time_in_idle);
+	delta_idle = (unsigned int) ktime_sub(now_idle, time_in_idle);
 	delta_time = (unsigned int) cputime64_sub(pcpu->timer_run_time,
 						  idle_exit_time);
 
@@ -413,14 +411,14 @@ static ssize_t store_hispeed_freq(struct kobject *kobj,
 	int ret;
 	u64 val;
 
-	ret = strict_strtoull(buf, 0, &val);
+	ret = kstrtoull(buf, 0, &val);
 	if (ret < 0)
 		return ret;
 	hispeed_freq = val;
 	return count;
 }
 
-static struct global_attr hispeed_freq_attr = __ATTR(hispeed_freq, 0644,
+static struct kobj_attribute hispeed_freq_attr = __ATTR(hispeed_freq, 0644,
 		show_hispeed_freq, store_hispeed_freq);
 
 
@@ -443,7 +441,7 @@ static ssize_t store_go_hispeed_load(struct kobject *kobj,
 	return count;
 }
 
-static struct global_attr go_hispeed_load_attr = __ATTR(go_hispeed_load, 0644,
+static struct kobj_attribute go_hispeed_load_attr = __ATTR(go_hispeed_load, 0644,
 		show_go_hispeed_load, store_go_hispeed_load);
 
 static ssize_t show_min_sample_time(struct kobject *kobj,
@@ -465,7 +463,7 @@ static ssize_t store_min_sample_time(struct kobject *kobj,
 	return count;
 }
 
-static struct global_attr min_sample_time_attr = __ATTR(min_sample_time, 0644,
+static struct kobj_attribute min_sample_time_attr = __ATTR(min_sample_time, 0644,
 		show_min_sample_time, store_min_sample_time);
 
 static ssize_t show_timer_rate(struct kobject *kobj,
@@ -487,7 +485,7 @@ static ssize_t store_timer_rate(struct kobject *kobj,
 	return count;
 }
 
-static struct global_attr timer_rate_attr = __ATTR(timer_rate, 0644,
+static struct kobj_attribute timer_rate_attr = __ATTR(timer_rate, 0644,
 		show_timer_rate, store_timer_rate);
 
 static struct attribute *interactive_attributes[] = {
