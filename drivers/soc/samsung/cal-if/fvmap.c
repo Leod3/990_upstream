@@ -676,45 +676,101 @@ static void fvmap_copy_from_sram(void __iomem *map_base, void __iomem *sram_base
 
 495+
 
-			// You can replace these lines with your own custom logic or values
+static void fvmap_copy_from_sram(void __iomem *map_base, void __iomem *sram_base)
+{
+    struct fvmap_header *fvmap_header, *header;
+    struct rate_volt_header *old, *new;
+    struct clocks *clks;
+    struct pll_header *plls;
+    struct vclk *vclk;
+    unsigned int member_addr;
+    unsigned int blk_idx;
+    int size, margin;
+    int i, j;
 
-496+
+    // Define your own custom values for rate and volt
+    int custom_rate_values[] = {754000, 702000, 650000, 598000, 572000, 433000, 377000, 325000, 260000, 200000, 156000, 100000};
+    int custom_volt_values[] = {681250, 668750, 662500, 656250, 650000, 625000, 612500, 587500, 568750, 568750, 543750, 537500};
 
-			new->table[j].rate = custom_rate_values[j]; // Replace custom_rate_values with your own array of rates
+    fvmap_header = map_base;
+    header = sram_base;
 
-497+
+    size = cmucal_get_list_size(ACPM_VCLK_TYPE);
 
-			new->table[j].volt = custom_volt_values[j]; // Replace custom_volt_values with your own array of voltages
+    for (i = 0; i < size; i++) {
+        // load fvmap info
+        fvmap_header[i].dvfs_type = header[i].dvfs_type;
+        fvmap_header[i].num_of_lv = header[i].num_of_lv;
+        fvmap_header[i].num_of_members = header[i].num_of_members;
+        fvmap_header[i].num_of_pll = header[i].num_of_pll;
+        fvmap_header[i].num_of_mux = header[i].num_of_mux;
+        fvmap_header[i].num_of_div = header[i].num_of_div;
+        fvmap_header[i].gearratio = header[i].gearratio;
+        fvmap_header[i].init_lv = header[i].init_lv;
+        fvmap_header[i].num_of_gate = header[i].num_of_gate;
+        fvmap_header[i].reserved[0] = header[i].reserved[0];
+        fvmap_header[i].reserved[1] = header[i].reserved[1];
+        fvmap_header[i].block_addr[0] = header[i].block_addr[0];
+        fvmap_header[i].block_addr[1] = header[i].block_addr[1];
+        fvmap_header[i].block_addr[2] = header[i].block_addr[2];
+        fvmap_header[i].o_members = header[i].o_members;
+        fvmap_header[i].o_ratevolt = header[i].o_ratevolt;
+        fvmap_header[i].o_tables = header[i].o_tables;
 
-498+
+        vclk = cmucal_get_node(ACPM_VCLK_TYPE | i);
+        if (vclk == NULL)
+            continue;
+        pr_info("dvfs_type : %s - id : %x\n",
+                vclk->name, fvmap_header[i].dvfs_type);
+        pr_info("  num_of_lv      : %d\n", fvmap_header[i].num_of_lv);
+        pr_info("  num_of_members : %d\n", fvmap_header[i].num_of_members);
 
-			pr_info(" lv : [%7d], volt = %d uV (%d %%) \n", new->table[j].rate, new->table[j].volt, volt_offset_percent);
+        old = sram_base + fvmap_header[i].o_ratevolt;
+        new = map_base + fvmap_header[i].o_ratevolt;
 
-499+
+        check_percent_margin(old, fvmap_header[i].num_of_lv);
 
-			}
+        margin = init_margin_table[vclk->margin_id];
+        if (margin)
+            cal_dfs_set_volt_margin(i | ACPM_VCLK_TYPE, margin);
 
-500+
+        for (j = 0; j < fvmap_header[i].num_of_members; j++) {
+            clks = sram_base + fvmap_header[i].o_members;
 
-		} else {
+            if (j < fvmap_header[i].num_of_pll) {
+                plls = sram_base + clks->addr[j];
+                member_addr = plls->addr - 0x90000000;
+            } else {
+                member_addr = (clks->addr[j] & ~0x3) & 0xffff;
+                blk_idx = clks->addr[j] & 0x3;
+                member_addr |= ((fvmap_header[i].block_addr[blk_idx]) << 16) - 0x90000000;
+            }
 
-501+
+            vclk->list[j] = cmucal_get_id_by_addr(member_addr);
 
-			for (j = 0; j < fvmap_header[i].num_of_lv; j++) {
+            if (vclk->list[j] == INVALID_CLK_ID)
+                pr_info("  Invalid addr :0x%x\n", member_addr);
+            else
+                pr_info("  DVFS CMU addr:0x%x\n", member_addr);
+        }
 
-502+
-
-				new->table[j].rate = old->table[j].rate;
-
-503+
-
-				new->table[j].volt = old->table[j].volt;
-
-504+
-
-				pr_info(" lv : [%7d], volt = %d uV (%d %%) \n", new->table[j].rate, new->table[j].volt, volt_offset_percent);
-		}
-	}
+        if (strcmp(vclk->name, "dvfs_g3d") == 0) {
+            for (j = 0; j < fvmap_header[i].num_of_lv; j++) {
+                // Instead of copying values from old->table[j], you can manually set your own values
+                // Example: Setting custom values for rate and volt
+                // You can replace these lines with your own custom logic or values
+                new->table[j].rate = custom_rate_values[j]; // Replace custom_rate_values with your own array of rates
+                new->table[j].volt = custom_volt_values[j]; // Replace custom_volt_values with your own array of voltages
+                pr_info(" lv : [%7d], volt = %d uV (%d %%) \n", new->table[j].rate, new->table[j].volt, volt_offset_percent);
+            }
+        } else {
+            for (j = 0; j < fvmap_header[i].num_of_lv; j++) {
+                new->table[j].rate = old->table[j].rate;
+                new->table[j].volt = old->table[j].volt;
+                pr_info(" lv : [%7d], volt = %d uV (%d %%) \n", new->table[j].rate, new->table[j].volt, volt_offset_percent);
+            }
+        }
+    }
 }
 
 int fvmap_init(void __iomem *sram_base)
