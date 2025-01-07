@@ -495,7 +495,7 @@
 			sse-mode = <AARCH64_MODE>;
 			      /* Vfreq  big(1)  Med(2)  Lit(3)  Mode*/
 			table = <
-				2730000	2730000	2600000	2002000 0
+				2730000	2730000	2600000	2106000 0
 				2623359	2626000	2600000	2002000 0
 				2519384	2522000	2600000	2002000 0
 				2415410	2418000	2600000	2002000 0
@@ -546,7 +546,7 @@
 			sse-mode = <AARCH32_MODE>;
 			      /* Vfreq    big      Lit  Mode */
 			table = <
-				2730000	2730000	2600000	2002000 0
+				2730000	2730000	2600000	2106000 0
 				2623359	2626000	2600000	2002000 0
 				2519384	2522000	2600000	2002000 0
 				2415410	2418000	2600000	2002000 0
@@ -597,7 +597,7 @@
 			sse-mode = <AARCH64_MODE>;
 			      /* Vfreq    big      Lit    Mode*/
 			table = <
-				2730000	2730000	2600000	2002000 3
+				2730000	2730000	2600000	2106000 3
 				2623359	2626000	2600000	2002000 3
 				2519384	2522000	2600000	2002000 3
 				2415410	2418000	2600000	2002000 3
@@ -647,7 +647,7 @@
 			ctrl-type = <PM_QOS_MIN_LIMIT>;
 			sse-mode = <AARCH32_MODE>;
 			table = <
-				2730000	2730000	2600000	2002000 3
+				2730000	2730000	2600000	2106000 3
 				2623359	2626000	2600000	2002000 3
 				2519384	2626000	2600000	2002000 3
 				2415410	2522000	2600000	2002000 3
@@ -749,8 +749,8 @@
 			cal-id = <ACPM_DVFS_CPUCL0>;
 			dm-type = <DM_CPU_CL0>;
 
-			max-freq = <2002000>;
-			min-freq = <442000>;
+			max-freq = <2106000>;
+			min-freq = <182000>;
 
 			/* PM QoS Class ID*/
 			pm_qos-min-class = <3>;
@@ -870,7 +870,7 @@
 			pm_qos-min-class = <7>;
 			pm_qos-max-class = <8>;
 
-                        pm_qos-booting = <2002000>;
+                        pm_qos-booting = <2106000>;
 
 			user-default-qos = <962000>;
 			user-boost = <2>;
@@ -929,7 +929,7 @@
 	exynos-hiu {
 		compatible = "samsung,exynos-hiu";
 		interrupts = <GIC_SPI INTREQ__CPUCL2_GCUIRQ IRQ_TYPE_LEVEL_HIGH>;
-		boost-threshold = <2002000>;
+		boost-threshold = <2106000>;
 		boost-max = <2730000>;
 		cal-id = <ACPM_DVFS_CPUCL2>;
 		sw-pbl = <0xff>;
@@ -957,7 +957,7 @@
 		sibling-cpus = "6-7";
 		down-step = <1>;
 
-		max-freq-wo-ocp = <2002000>;
+		max-freq-wo-ocp = <2106000>;
 
 		release-mode = <1>;             /* 0 : current meter, 1 : cpu utilization */
 		release-threshold = <50>;       /* @current meter : current(A), @cpu load : capacity ratio(%) */
