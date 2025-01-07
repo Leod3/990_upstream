@@ -31,7 +31,7 @@
 		/*  8 columns      freq  down   up  stay  mif   little  middle   big  */
 		gpu_dvfs_table = <
 			832000    78  100   5  2730000  1300000 1404000 1690000
-			800000    78  100   5  2730000  1300000       0 1690000
+			754000    78  100   5  2730000  1300000       0 1690000
 			702000    78   90   5  2535000  1300000       0       0
 			572000    78   90   1  2028000  1300000       0       0
 			455000    75   85   1  1539000  1300000       0       0
@@ -43,7 +43,7 @@
 		/*  g3d-freq  mif-min  mif-max  lit-min lit-max  mid-min  mid-max  big-min  big-max  */
 		gpu_cl_pmqos_table = <
 			832000    2028000  1300000 1404000 1690000
-			800000    2028000  1300000       0 1690000
+			754000    2028000  1300000       0 1690000
 			702000    1539000  1300000       0       0
 			572000    1539000  1300000       0       0
 			455000    1352000  1300000       0       0
@@ -54,17 +54,17 @@
 		gpu_pmqos_cpu_cluster_num = <3>;
 		gpu_pmu_status_reg_offset = <0x2204>;
 		gpu_pmu_status_local_pwr_mask = <0x1>; /*0x1 << 0*/
-		gpu_max_clock = <800000>;
-		gpu_max_clock_limit = <800000>;
+		gpu_max_clock = <754000>;
+		gpu_max_clock_limit = <754000>;
 		gpu_min_clock = <156000>;
 		gpu_dvfs_start_clock = <702000>;
 		gpu_dvfs_bl_config_clock = <156000>;
-		gpu_default_voltage = <800000>;
+		gpu_default_voltage = <754000>;
 		gpu_cold_minimum_vol = <0>;
 		gpu_voltage_offset_margin = <37500>;
 		gpu_tmu_control = <1>;
 		gpu_temp_throttling_level_num = <6>;
-		gpu_temp_throttling = <800000 702000 572000 455000 377000 260000>;
+		gpu_temp_throttling = <754000 702000 572000 455000 377000 260000>;
 		gpu_power_coeff = <625>;
 		gpu_dvfs_time_interval = <5>; /*1 tick : 10ms*/
 		gpu_default_wakeup_lock = <1>;
@@ -81,7 +81,7 @@
 		gpu_pmqos_compute_mif_max_clock = <2535000>;
 		gpu_pmqos_mif_max_clock = <2730000>;
 		gpu_pmqos_mif_max_clock_base = <650000>;
-		gpu_pmqos_g3d_clock = <800000 702000>;
+		gpu_pmqos_g3d_clock = <754000 702000>;
 		gpu_pmqos_cl2_max_clock = <1378000 1690000>;
 		gpu_pmqos_cl1_max_clock = <1690000 0>;
 		gpu_cl_dvfs_start_base = <156000>;
@@ -90,10 +90,10 @@
 		gpu_mo_min_clock = <156000>;
 		gpu_boost_gpu_min_lock = <0>;
 		gpu_boost_egl_min_lock = <1872000>;
-		gpu_vk_boost_max_lock = <800000>;
+		gpu_vk_boost_max_lock = <754000>;
 		gpu_vk_boost_mif_min_lock = <1014000>;
 		gpu_bts_support = <1>;
-		gpu_neg_boost_clock = <800000>;
+		gpu_neg_boost_clock = <754000>;
 		gpu_ess_id_type = <ESS_FLAG_G3D>;
 	};
 };
