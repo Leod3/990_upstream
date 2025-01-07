@@ -27,7 +27,6 @@
 #include <linux/workqueue.h>
 #include <linux/kthread.h>
 
-#include <asm/cputime.h>
 
 static atomic_t active_count = ATOMIC_INIT(0);
 
