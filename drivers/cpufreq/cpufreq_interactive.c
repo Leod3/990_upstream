@@ -81,7 +81,7 @@ static int cpufreq_governor_interactive(struct cpufreq_policy *policy,
 #ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE
 static
 #endif
-struct cpufreq_governor cpufreq_gov_interactive = {
+struct cpufreq_governor cpufreq_interactive = {
 	.name = "interactive",
 	.governor = cpufreq_governor_interactive,
 	.max_transition_latency = 10000000,
