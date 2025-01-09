@@ -465,7 +465,7 @@
 
 		device_type = "cpufreq_ufc";
 		table-col = <5>;
-		table-row = <42>;
+		table-row = <43>;
 		fill-flag = <AUTO_FILL>;
 
 		domain@0 {
@@ -934,7 +934,7 @@
 		compatible = "samsung,exynos-hiu";
 		interrupts = <GIC_SPI INTREQ__CPUCL2_GCUIRQ IRQ_TYPE_LEVEL_HIGH>;
 		boost-threshold = <2106000>;
-		boost-max = <2730000>;
+		boost-max = <3016000>;
 		cal-id = <ACPM_DVFS_CPUCL2>;
 		sw-pbl = <0xff>;
 		bl1-inc = <0>;
@@ -961,7 +961,7 @@
 		sibling-cpus = "6-7";
 		down-step = <1>;
 
-		max-freq-wo-ocp = <2106000>;
+		max-freq-wo-ocp = <3016000>;
 
 		release-mode = <1>;             /* 0 : current meter, 1 : cpu utilization */
 		release-threshold = <50>;       /* @current meter : current(A), @cpu load : capacity ratio(%) */
@@ -2361,7 +2361,7 @@
 			};
 			dvfs_gpu {
 				dm-index = <DM_GPU>;
-				available = "false";
+				available = "true";
 				cal_id = <ACPM_DVFS_G3D>;
 				dm_type_name = "dm_gpu";
 			};
