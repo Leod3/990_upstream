@@ -477,8 +477,8 @@
 			cal-id = <ACPM_DVFS_CPUCL0>;
 			dm-type = <DM_CPU_CL0>;
 
-			max-freq = <1586000>;
-			min-freq = <442000>;
+			max-freq = <2106000>;
+			min-freq = <182000>;
 
 			/* PM QoS Class ID*/
 			pm_qos-min-class = <3>;
@@ -526,7 +526,7 @@
 			cal-id = <ACPM_DVFS_CPUCL1>;
 			dm-type = <DM_CPU_CL1>;
 
-			max-freq = <1898000>;
+			max-freq = <2600000>;
 			min-freq = <507000>;
 
 			/* PM QoS Class ID*/
@@ -581,7 +581,7 @@
 			dm-type = <DM_CPU_CL2>;
 			need-awake;
 
-			max-freq = <1482000>;
+			max-freq = <3016000>;
 			min-freq = <546000>;
 
 			/* PM QoS Class ID*/
@@ -651,7 +651,7 @@
 
 		device_type = "cpufreq_ufc";
 		table-col = <4>;
-		table-row = <42>;
+		table-row = <43>;
 
 		domain@0 {
 			device_type = "ufc_domain";
@@ -912,7 +912,7 @@
 		sibling-cpus = "6-7";
 		down-step = <1>;
 
-		max-freq-wo-ocp = <1482000>;
+		max-freq-wo-ocp = <3016000>;
 
 		release-mode = <1>;             /* 0 : current meter, 1 : cpu utilization */
 		release-threshold = <50>;       /* @current meter : current(A), @cpu load : capacity ratio(%) */
